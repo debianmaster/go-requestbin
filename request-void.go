@@ -1,0 +1,53 @@
+package main
+
+import (
+	"io/ioutil"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+)
+
+type request struct {
+	body         string
+	receivedTime time.Time
+}
+
+type templatableRequest struct {
+	TimeSinceReceived time.Duration
+	Body              string
+}
+
+func main() {
+	requests := make([]request, 0)
+	var requestsLock sync.Mutex
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "could not read request body: "+err.Error(), 500)
+			return
+		}
+
+		requestsLock.Lock()
+		requests = append(requests, request{body: string(body), receivedTime: time.Now()})
+		requestsLock.Unlock()
+	})
+
+	http.HandleFunc("/inspect", func(w http.ResponseWriter, r *http.Request) {
+		requestsLock.Lock()
+		defer requestsLock.Unlock()
+		templInfo := make([]templatableRequest, 0, len(requests))
+
+		for i := len(requests) - 1; i >= 0; i-- {
+			templInfo = append(templInfo, templatableRequest{
+				TimeSinceReceived: time.Since(requests[i].receivedTime),
+				Body:              requests[i].body})
+		}
+
+		inspectPageTemplate.Execute(w, templInfo)
+	})
+         
+	log.Fatalln(http.ListenAndServe(":8080", nil))
+}
